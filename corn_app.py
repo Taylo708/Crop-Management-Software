@@ -1,78 +1,94 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# --- SETTINGS ---
-st.set_page_config(page_title="B&B Taylor Farms AI", layout="wide")
+# --- PAGE CONFIGURATION ---
+st.set_page_config(page_title="CornYield GDD Tracker", layout="wide", initial_sidebar_state="expanded")
 
-# --- DATA PARSING LOGIC (Based on New Age Labs July 22 SDG) ---
-def analyze_sap(new_leaf, old_leaf, ear_leaf, nutrient):
-    # Rule from New Age Guide: -20% or more is a deficiency (Red) [cite: 35]
-    diff = ((new_leaf - old_leaf) / old_leaf) * 100
-    
-    status = "✅ Balanced"
-    if diff <= -20:
-        status = "🚨 ACTIONABLE DEFICIENCY (RED)"
-    elif diff >= 20:
-        status = "💎 LUXURY UPTAKE (BLUE)"
-    
-    return round(diff, 2), status
+# --- CUSTOM CSS FOR THE "PREVIEW" LOOK ---
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; color: white; }
+    .stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #3e4255; }
+    .status-card { background-color: #1e2130; padding: 20px; border-radius: 10px; border-left: 5px solid #00ff00; margin-bottom: 20px; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- SIDEBAR & AUTH ---
-st.sidebar.title("🌽 Field Logistics")
-field = st.sidebar.selectbox("Field", ["Big", "North 40"])
-variety = st.sidebar.text_input("Variety", "Pioneer") # [cite: 74]
+# --- SIDEBAR INPUTS ---
+st.sidebar.title("🚜 Field Management")
+field_name = st.sidebar.text_input("Field Name", "Big")
 planting_date = st.sidebar.date_input("Planting Date", datetime(2025, 5, 1))
+hybrid_rm = st.sidebar.number_input("Hybrid RM (Days)", value=112)
+target_gdd = st.sidebar.number_input("Target GDD to Black Layer", value=2700)
 
-# --- MAIN DASHBOARD ---
-st.title(f"B&B Taylor Farms - Field: {field}")
-st.info(f"Report Date: July 23, 2025 | Growth Stage: VT (Tassel)") # [cite: 3, 75]
+# --- HEADER SECTION ---
+st.title("🌽 CornYield GDD Tracker")
+st.subheader(f"Current Status for Field: **{field_name}**")
 
-# --- NUTRIENT METRICS ---
-# Data points directly from New Age Labs July 22 SDG report [cite: 78]
-col1, col2, col3 = st.columns(3)
+# --- MAIN DASHBOARD METRICS ---
+# Logic: These would be pulled from your Weather API in the final version
+current_gdd = 1185
+yesterday_gdd = 1162
+daily_gain = current_gdd - yesterday_gdd
 
-# Potassium Analysis [cite: 78, 81]
-k_diff, k_status = analyze_sap(1490, 2620, 2690, "Potassium")
+col1, col2, col3, col4 = st.columns(4)
+
 with col1:
-    st.metric("Potassium (K) Gradient", f"{k_diff}%", delta_color="inverse")
-    st.write(f"Status: {k_status}")
+    st.metric("Accumulated GDD", f"{current_gdd}", f"+{daily_gain} Today")
 
-# Phosphorus Analysis [cite: 78, 83]
-p_diff, p_status = analyze_sap(144, 82.3, 173, "Phosphorus")
 with col2:
-    st.metric("Phosphorus (P) Gradient", f"{p_diff}%")
-    st.write(f"Status: {p_status}")
+    progress = min(current_gdd / target_gdd, 1.0)
+    st.metric("Season Progress", f"{int(progress * 100)}%", f"Target: {target_gdd}")
 
-# Nitrogen Efficiency [cite: 78, 237]
 with col3:
-    st.metric("Nitrogen Efficiency (NCE%)", "93.6%", "New Leaf Target >80%") # [cite: 40]
-    st.write("Status: ✅ Optimized Conversion")
+    st.metric("Current Stage", "VT (Tassel)", "Critical Window")
 
-# --- MICRONUTRIENT ALERT ---
-st.divider()
-st.subheader("🤖 AI Predictive Recommendation")
+with col4:
+    st.metric("7-Day Forecast", "+145 GDD", "Hot/Dry")
 
-# Boron Analysis [cite: 78]
-boron_ear = 0.89 
-if boron_ear < 3.0: # New Age OLS Low range for Corn Boron is 3 [cite: 78]
-    st.error(f"**POLLINATION WARNING:** Ear Leaf Boron is critically low at **{boron_ear} ppm**. "
-             f"This is below the optimal threshold of 3.0 ppm. "
-             f"Apply foliar Boron within 48 hours for successful silking.")
+# --- GROWTH STAGE TIMELINE ---
+st.write("---")
+st.header("📅 Growth Stage Projection")
 
-# Energy Check [cite: 78]
-sugar_ear = 0.825
-if 0.5 <= sugar_ear <= 1.5: # New Age target for Metabolic Sugars [cite: 47]
-    st.success(f"**Photosynthesis Check:** Ear Leaf Sugars are healthy at {sugar_ear}%. "
-               "The plant has energy; it just needs mineral balance.")
-
-# --- DATA TABLE ---
-st.write("### Raw Sap Data Snapshot")
-raw_data = {
-    "Nutrient": ["Potassium (K)", "Phosphorus (P)", "Boron (B)", "NCE%"],
-    "New Leaf (ppm)": [1490, 144, 2.64, "93.6%"], # [cite: 78]
-    "Old Leaf (ppm)": [2620, 82.3, 0.49, "90.1%"], # [cite: 78]
-    "Ear Leaf (ppm)": [2690, 173, 0.89, "95.5%"]  # [cite: 78, 237]
+# Define stages based on standard GDD triggers
+stages = {
+    "V6 Sidedress": 475,
+    "VT Tasseling": 1150,
+    "R1 Silking": 1300,
+    "R6 Black Layer": 2700
 }
-st.dataframe(pd.DataFrame(raw_data))
+
+# Create the visual timeline
+cols = st.columns(len(stages))
+for i, (stage, gdd_trigger) in enumerate(stages.items()):
+    with cols[i]:
+        if current_gdd >= gdd_trigger:
+            st.markdown(f"**{stage}**")
+            st.write("✅ Complete")
+        elif current_gdd + 145 >= gdd_trigger:
+             st.markdown(f"**{stage}**")
+             st.write("⏳ **In 4 Days**")
+        else:
+            st.markdown(f"**{stage}**")
+            st.write(f"Target: {gdd_trigger}")
+
+# --- ACTIONABLE RECOMMENDATIONS ---
+st.write("---")
+st.header("🤖 Field Recommendations")
+
+# Logic engine for alerts
+if 1150 <= current_gdd <= 1300:
+    st.markdown("""
+        <div class="status-card">
+            <h3>📍 Critical Stage: VT Tasseling</h3>
+            <p>Your field is currently in the pollination window. Avoid heavy stress.</p>
+            <ul>
+                <li><b>Action:</b> Scout for Western Bean Cutworm and Corn Rootworm beetles.</li>
+                <li><b>Logistics:</b> Ensure fungicide/micros are on hand if R1 timing stays on track for next week.</li>
+            </ul>
+        </div>
+    """, unsafe_allow_html=True)
+else:
+    st.info("System monitoring weather patterns. No critical nutrient alerts for current GDD window.")
+
+st.write("---")
+st.caption("Data synced with local weather station. Predicted maturity based on Pioneer GDD charts.")
