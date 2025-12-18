@@ -1,94 +1,75 @@
 import streamlit as st
+import pandas as pd
+import folium
+from streamlit_folium import st_folium
 from datetime import datetime, timedelta
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="CornYield GDD Tracker", layout="wide", initial_sidebar_state="expanded")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Taylor Farms AI - Weather & GDD", layout="wide")
 
-# --- CUSTOM CSS FOR THE "PREVIEW" LOOK ---
-st.markdown("""
-    <style>
-    .main { background-color: #0e1117; color: white; }
-    .stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #3e4255; }
-    .status-card { background-color: #1e2130; padding: 20px; border-radius: 10px; border-left: 5px solid #00ff00; margin-bottom: 20px; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- GDD CALCULATION LOGIC ---
+def calculate_gdd(tmax, tmin):
+    # Standard Corn GDD: Base 50°F, Ceiling 86°F
+    tmax = 86 if tmax > 86 else (50 if tmax < 50 else tmax)
+    tmin = 86 if tmin > 86 else (50 if tmin < 50 else tmin)
+    gdd = ((tmax + tmin) / 2) - 50
+    return max(0, gdd)
 
-# --- SIDEBAR INPUTS ---
-st.sidebar.title("🚜 Field Management")
-field_name = st.sidebar.text_input("Field Name", "Big")
-planting_date = st.sidebar.date_input("Planting Date", datetime(2025, 5, 1))
-hybrid_rm = st.sidebar.number_input("Hybrid RM (Days)", value=112)
-target_gdd = st.sidebar.number_input("Target GDD to Black Layer", value=2700)
+# --- APP FRONTEND ---
+st.title("🌽 B&B Taylor Farms: GDD & Weather Forecast")
 
-# --- HEADER SECTION ---
-st.title("🌽 CornYield GDD Tracker")
-st.subheader(f"Current Status for Field: **{field_name}**")
+col_metrics, col_map = st.columns([1, 2])
 
-# --- MAIN DASHBOARD METRICS ---
-# Logic: These would be pulled from your Weather API in the final version
-current_gdd = 1185
-yesterday_gdd = 1162
-daily_gain = current_gdd - yesterday_gdd
+with col_metrics:
+    st.subheader("Field Vitals: Big")
+    current_gdd = 1185 # From your July 23 Status
+    st.metric("Accumulated GDD", f"{current_gdd}", "+24 Today")
+    st.metric("Current Stage", "VT (Tassel)")
+    
+    # Milestone Tracking
+    silk_target = 1300
+    gdds_needed = silk_target - current_gdd
+    st.write(f"**GDDs to Silking (R1):** {int(gdds_needed)}")
+    st.progress(current_gdd / 2700, text="Progress to Black Layer")
 
-col1, col2, col3, col4 = st.columns(4)
+with col_map:
+    # Field Map centered on Stockbridge, MI
+    m = folium.Map(location=[42.4590, -84.1950], zoom_start=15, tiles="CartoDB satellite")
+    st_folium(m, width=700, height=350)
 
-with col1:
-    st.metric("Accumulated GDD", f"{current_gdd}", f"+{daily_gain} Today")
+st.divider()
 
-with col2:
-    progress = min(current_gdd / target_gdd, 1.0)
-    st.metric("Season Progress", f"{int(progress * 100)}%", f"Target: {target_gdd}")
+# --- WEATHER FORECAST & GDD PROJECTION ---
+st.header("📅 7-Day GDD Projection")
+st.write("Calculated using the 86/50 method for Pioneer Hybrid.")
 
-with col3:
-    st.metric("Current Stage", "VT (Tassel)", "Critical Window")
+# Mock Forecast Data (This would connect to a Weather API in a full build)
+dates = [(datetime.now() + timedelta(days=i)).strftime('%b %d') for i in range(7)]
+highs = [88, 90, 92, 85, 84, 87, 89]
+lows = [65, 68, 70, 64, 62, 65, 67]
 
-with col4:
-    st.metric("7-Day Forecast", "+145 GDD", "Hot/Dry")
+gdd_forecast = []
+running_total = current_gdd
 
-# --- GROWTH STAGE TIMELINE ---
-st.write("---")
-st.header("📅 Growth Stage Projection")
+for h, l in zip(highs, lows):
+    gain = calculate_gdd(h, l)
+    running_total += gain
+    gdd_forecast.append({
+        "Daily Gain": gain,
+        "Running Total": int(running_total)
+    })
 
-# Define stages based on standard GDD triggers
-stages = {
-    "V6 Sidedress": 475,
-    "VT Tasseling": 1150,
-    "R1 Silking": 1300,
-    "R6 Black Layer": 2700
-}
+forecast_df = pd.DataFrame({
+    "Date": dates,
+    "High (°F)": highs,
+    "Low (°F)": lows,
+    "GDD Gain": [d["Daily Gain"] for d in gdd_forecast],
+    "Proj. Total": [d["Running Total"] for d in gdd_forecast]
+})
 
-# Create the visual timeline
-cols = st.columns(len(stages))
-for i, (stage, gdd_trigger) in enumerate(stages.items()):
-    with cols[i]:
-        if current_gdd >= gdd_trigger:
-            st.markdown(f"**{stage}**")
-            st.write("✅ Complete")
-        elif current_gdd + 145 >= gdd_trigger:
-             st.markdown(f"**{stage}**")
-             st.write("⏳ **In 4 Days**")
-        else:
-            st.markdown(f"**{stage}**")
-            st.write(f"Target: {gdd_trigger}")
+st.table(forecast_df)
 
-# --- ACTIONABLE RECOMMENDATIONS ---
-st.write("---")
-st.header("🤖 Field Recommendations")
-
-# Logic engine for alerts
-if 1150 <= current_gdd <= 1300:
-    st.markdown("""
-        <div class="status-card">
-            <h3>📍 Critical Stage: VT Tasseling</h3>
-            <p>Your field is currently in the pollination window. Avoid heavy stress.</p>
-            <ul>
-                <li><b>Action:</b> Scout for Western Bean Cutworm and Corn Rootworm beetles.</li>
-                <li><b>Logistics:</b> Ensure fungicide/micros are on hand if R1 timing stays on track for next week.</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-else:
-    st.info("System monitoring weather patterns. No critical nutrient alerts for current GDD window.")
-
-st.write("---")
-st.caption("Data synced with local weather station. Predicted maturity based on Pioneer GDD charts.")
+# --- SMART ALERT ---
+projected_r1 = dates[next(i for i, d in enumerate(gdd_forecast) if d["Running Total"] >= silk_target)]
+st.success(f"### 🤖 AI Forecast: **Silking (R1)** is projected to begin on **{projected_r1}**.")
+st.info("Based on your Pioneer variety at the 'Big' field, ensure all VT nutrient passes are completed before this date.")
